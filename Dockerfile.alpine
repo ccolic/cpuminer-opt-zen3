@@ -1,0 +1,61 @@
+# cpuminer-opt optimized for AMD Ryzen 9 5950X (Zen 3)
+# Alpine-based for smaller image size (~15MB vs ~80MB Debian)
+#
+# Enables: AVX2, AES-NI, SHA extensions
+#
+# Build with: docker build -t cpuminer-opt:zen3-alpine .
+
+FROM alpine:3.20 AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    build-base \
+    autoconf \
+    automake \
+    libtool \
+    curl-dev \
+    jansson-dev \
+    openssl-dev \
+    gmp-dev \
+    zlib-dev \
+    git
+
+# Clone cpuminer-opt (JayDDee's optimized version)
+WORKDIR /build
+RUN git clone --depth 1 https://github.com/JayDDee/cpuminer-opt.git
+
+WORKDIR /build/cpuminer-opt
+
+# Build with Zen 3 optimizations
+# -march=znver3 enables: AVX2, AES-NI, SHA, SSE4.2, and all Zen 3 specific features
+# This is critical for hardware SHA acceleration on Ryzen
+RUN ./autogen.sh && \
+    ./configure \
+        CFLAGS="-O3 -march=znver3 -mtune=znver3" \
+        CXXFLAGS="-O3 -march=znver3 -mtune=znver3" \
+        --with-curl \
+        --with-crypto && \
+    make -j$(nproc)
+
+# Runtime image
+FROM alpine:3.20
+
+# Install runtime dependencies only
+RUN apk add --no-cache \
+    libcurl \
+    jansson \
+    openssl \
+    gmp \
+    libgcc \
+    libstdc++
+
+# Copy the compiled binary
+COPY --from=builder /build/cpuminer-opt/cpuminer /usr/local/bin/cpuminer
+
+# Create non-root user for security
+RUN adduser -D -H -s /sbin/nologin miner
+USER miner
+
+ENTRYPOINT ["cpuminer"]
+CMD ["--help"]
+
